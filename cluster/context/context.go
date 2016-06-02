@@ -88,7 +88,10 @@ func (ctx *ClusterContext) initContext() {
 	// ctx.parsePortBindings()
 
 	log.Info("Init container description")
-	ctx.initContainerDescription()
+	err := ctx.initContainerDescription()
+	if err != nil {
+		panic("Fail to init container description, err: " + err.Error())
+	}
 
 	supportedDrivers := strings.Join(ctx.clusterDesc.Machine.Cloud.SurportedDrivers(), ",")
 	log.Infof("Create a new machine proxy. cluster by:%s, supported drivers:%s, discovery: %s, master: %s\n", ctx.clusterDesc.ClusterBy, supportedDrivers, ctx.clusterDesc.Discovery, ctx.clusterDesc.Master)
@@ -241,7 +244,7 @@ func (ctx *ClusterContext) initServiceDiscovery() error {
 	}
 
 	for sdName, sdd := range ctx.clusterDesc.ServiceDiscover {
-		driver, err := discovery.NewRegDriver(sdd)
+		driver, err := discovery.NewRegDriver(sdd["driver"], ctx.clusterDesc)
 		if err != nil {
 			return errors.New(fmt.Sprintf("Failed to create Reg Driver:'%s'. err:%s", sdName, err.Error()))
 		}
@@ -382,7 +385,8 @@ func (ctx *ClusterContext) initMachineSequence(mifs []dmachine.MachineInfo) {
 
 func (ctx *ClusterContext) getMaster() (dmachine.MachineInfo, bool) {
 	for _, mi := range ctx.machineInfos {
-		if mi.IsMaster() {
+		fmt.Printf("ctx.clusterDesc.Master: %s, mi name: %s \n", ctx.clusterDesc.Master, mi.Name)
+		if mi.IsMaster() && mi.Name == ctx.clusterDesc.Master {
 			return mi, true
 		}
 	}
@@ -735,6 +739,8 @@ func (ctx *ClusterContext) runContainer(cd *dcluster.ContainerDescription, grp s
 	log.Infof("Run a new container. name:%s, image:%s, group:%s.\n", name, cd.Image, group)
 	envs := []string{"constraint:role==slave", "constraint:group==" + cd.Machine}
 	envs = append(envs, cd.Env...)
+	envs = append(envs, "CONSUL_URL="+fmt.Sprintf("%s:8500", ctx.clusterDesc.ConsulCluster.Server.IPs[0]))
+
 	if cd.URL != "" {
 		url := cd.URL
 		idx := strings.IndexAny(url, ".")

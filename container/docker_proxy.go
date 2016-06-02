@@ -1,12 +1,9 @@
 package container
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"strings"
 	"time"
 
@@ -51,36 +48,6 @@ func normalizeString(param string) string {
 	return strings.TrimPrefix(strings.TrimSuffix(param, "\""), "\"")
 }
 
-func loadTLSConfig(ca, cert, key string, verify bool) (*tls.Config, error) {
-	c, err := tls.LoadX509KeyPair(cert, key)
-	if err != nil {
-		return nil, fmt.Errorf("Couldn't load X509 key pair (%s, %s): %s. Key encrypted?",
-			cert, key, err)
-	}
-
-	config := &tls.Config{
-		Certificates: []tls.Certificate{c},
-		MinVersion:   tls.VersionTLS10,
-	}
-
-	if verify {
-		certPool := x509.NewCertPool()
-		file, err := ioutil.ReadFile(ca)
-		if err != nil {
-			return nil, fmt.Errorf("Couldn't read CA certificate: %s", err)
-		}
-		certPool.AppendCertsFromPEM(file)
-		config.RootCAs = certPool
-		config.ClientAuth = tls.RequireAndVerifyClientCert
-		config.ClientCAs = certPool
-	} else {
-		// If --tlsverify is not supplied, disable CA validation.
-		config.InsecureSkipVerify = true
-	}
-
-	return config, nil
-}
-
 func (d *DockerProxy) RunByConfig(runConfig ContainerRunConfig) (string, error) {
 	portBingds := map[string][]dockerclient.PortBinding{}
 	exposedPorts := map[string]struct{}{}
@@ -102,12 +69,6 @@ func (d *DockerProxy) RunByConfig(runConfig ContainerRunConfig) (string, error) 
 
 	config.ExposedPorts = exposedPorts
 
-	cid, err := d.CreateContainer(config, runConfig.Name)
-	if err != nil {
-		return "", errors.New(fmt.Sprintf("Failed to create a container. name: %s, error: %s", runConfig.Name, err.Error()))
-	}
-	fmt.Printf("Container created. name:%s, id:%s\n", runConfig.Name, cid)
-
 	hostConfig := &dockerclient.HostConfig{}
 
 	hostConfig.PortBindings = portBingds
@@ -117,6 +78,14 @@ func (d *DockerProxy) RunByConfig(runConfig ContainerRunConfig) (string, error) 
 		Name:              runConfig.RestartPolicy.Name,
 		MaximumRetryCount: int64(runConfig.RestartPolicy.MaxTry),
 	}
+
+	config.HostConfig = *hostConfig
+
+	cid, err := d.CreateContainer(config, runConfig.Name)
+	if err != nil {
+		return "", errors.New(fmt.Sprintf("Failed to create a container. name: %s, error: %s", runConfig.Name, err.Error()))
+	}
+	fmt.Printf("Container created. name:%s, id:%s\n", runConfig.Name, cid)
 
 	if err := d.StartContainer(cid, hostConfig); err != nil {
 		fmt.Printf("Failed to start container. name:%s, id:%s.\n", runConfig.Name, cid)
